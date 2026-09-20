@@ -677,6 +677,13 @@ def create_link():
     data = request.get_json()
     original_url = data.get("url", "").strip()
     
+    # تصحيح الروابط الخاطئة التي تحتوي على https// وتجنب تكرار البروتوكول
+    original_url = original_url.replace("https//", "https://").replace("http//", "http://")
+    while original_url.startswith("https://https://"):
+        original_url = original_url.replace("https://https://", "https://", 1)
+    while original_url.startswith("http://http://"):
+        original_url = original_url.replace("http://http://", "http://", 1)
+
     if not original_url.startswith(("http://", "https://")):
         original_url = "https://" + original_url
     
