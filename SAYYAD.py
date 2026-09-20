@@ -1,11 +1,12 @@
-from flask import Flask, request, redirect, render_template_string, jsonify, send_file
+from flask import Flask, request, redirect, render_template_string, jsonify, send_file  # pyright: ignore[reportMissingImports]
 import uuid
 import json
 import os
 from datetime import datetime
 
 try:
-    from playwright.sync_api import sync_playwright
+    # Load Playwright optionally so the application can run without it installed.
+    sync_playwright = __import__("playwright.sync_api", fromlist=["sync_playwright"]).sync_playwright
     PLAYWRIGHT_AVAILABLE = True
 except ImportError:
     PLAYWRIGHT_AVAILABLE = False
