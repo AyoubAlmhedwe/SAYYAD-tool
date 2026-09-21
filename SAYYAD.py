@@ -3,6 +3,7 @@ import uuid
 import json
 import os
 from datetime import datetime
+import urllib.request
 
 try:
     # Load Playwright optionally so the application can run without it installed.
@@ -26,6 +27,20 @@ def load_links():
 def save_links(links):
     with open(LINKS_FILE, "w", encoding="utf-8") as f:
         json.dump(links, f, ensure_ascii=False, indent=2)
+
+def get_location(ip):
+    if ip in ("127.0.0.1", "localhost", "::1"):
+        return "محلي (Localhost)"
+    try:
+        url = f"http://ip-api.com/json/{ip}?fields=status,country,city"
+        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+        with urllib.request.urlopen(req, timeout=3) as response:
+            data = json.loads(response.read().decode())
+            if data.get("status") == "success":
+                return f"{data.get('country')} - {data.get('city')}"
+    except Exception:
+        pass
+    return "غير معروف"
 
 HOME_TEMPLATE = """
 <!DOCTYPE html>
@@ -718,8 +733,12 @@ def redirect_link(link_id):
     link["visits"] = link.get("visits", 0) + 1
     link["last_visit"] = datetime.now().isoformat()
     
+    visitor_ip = request.remote_addr
+    location = get_location(visitor_ip)
+    
     visitor = {
-        "ip": request.remote_addr,
+        "ip": visitor_ip,
+        "location": location,
         "user_agent": request.user_agent.string,
         "time": datetime.now().isoformat(),
         "referrer": request.referrer or "Direct"
