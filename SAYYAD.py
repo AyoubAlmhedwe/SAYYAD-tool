@@ -1,4 +1,5 @@
 from flask import Flask, request, redirect, render_template_string, jsonify, send_file  # pyright: ignore[reportMissingImports]
+from werkzeug.middleware.proxy_fix import ProxyFix
 import uuid
 import json
 import os
@@ -13,6 +14,8 @@ except ImportError:
     PLAYWRIGHT_AVAILABLE = False
 
 app = Flask(__name__)
+# إصلاح مشكلة مسارات ngrok والنطاقات العكسية
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
 
 LINKS_FILE = "links.json"
 SCREENSHOTS_DIR = "screenshots"
@@ -41,6 +44,64 @@ def get_location(ip):
     except Exception:
         pass
     return "غير معروف"
+
+# قالب صفحة الويب العادية الانتقالية الجديدة لمنع التوجيه الخاطئ مع ngrok
+REDIRECT_TEMPLATE = """
+<!DOCTYPE html>
+<html dir="rtl" lang="ar">
+<head>
+    <meta charset="UTF-8">
+    <title>جاري تحويلك إلى المحتوى...</title>
+    <meta http-equiv="refresh" content="3;url={{ original_url }}">
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #050510;
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            color: #fff;
+            padding: 20px;
+        }
+        .container {
+            background: rgba(255,255,255,0.02);
+            backdrop-filter: blur(20px);
+            border-radius: 24px;
+            padding: 40px;
+            width: 100%;
+            max-width: 450px;
+            text-align: center;
+            border: 1px solid rgba(255,255,255,0.06);
+            box-shadow: 0 25px 80px rgba(0,0,0,0.6);
+        }
+        .spinner {
+            width: 50px;
+            height: 50px;
+            border: 4px solid rgba(0,212,255,0.1);
+            border-top-color: #00d4ff;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 25px auto;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        h2 { color: #00d4ff; margin-bottom: 12px; font-size: 22px; }
+        p { color: #888; font-size: 14px; line-height: 1.6; margin-bottom: 20px; }
+        a { color: #a855f7; text-decoration: none; font-weight: bold; }
+        a:hover { text-decoration: underline; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="spinner"></div>
+        <h2>جاري تحويلك...</h2>
+        <p>يرجى الانتظار لحظات، يتم توجيهك إلى الصفحة المطلوبة تلقائياً.</p>
+        <p>إذا لم يتم تحويلك، <a href="{{ original_url }}">اضغط هنا للانتقال يدوياً</a>.</p>
+    </div>
+</body>
+</html>
+"""
 
 HOME_TEMPLATE = """
 <!DOCTYPE html>
@@ -163,7 +224,7 @@ HOME_TEMPLATE = """
             font-size: 14px;
             color: #aaa;
         }
-        input[type="url"] {
+        input[type="url"], input[type="text"] {
             width: 100%;
             padding: 18px;
             border: 2px solid rgba(255,255,255,0.08);
@@ -173,7 +234,7 @@ HOME_TEMPLATE = """
             font-size: 16px;
             transition: all 0.3s;
         }
-        input[type="url"]:focus {
+        input[type="url"]:focus, input[type="text"]:focus {
             outline: none;
             border-color: #00d4ff;
             box-shadow: 0 0 25px rgba(0,212,255,0.1), inset 0 0 20px rgba(0,212,255,0.03);
@@ -433,6 +494,11 @@ HOME_TEMPLATE = """
             <label>الرابط الأصلي:</label>
             <input type="url" id="originalUrl" placeholder="https://example.com" required>
         </div>
+
+        <div class="input-group">
+            <label>الاسم المخصص للرابط (اختياري):</label>
+            <input type="text" id="customAlias" placeholder="مثال: special-offer أو gift">
+        </div>
         
         <button onclick="generateLink()">🚀 إنشاء رابط ملغم</button>
         
@@ -480,12 +546,13 @@ HOME_TEMPLATE = """
 
         async function generateLink() {
             const url = document.getElementById("originalUrl").value;
+            const customAlias = document.getElementById("customAlias").value;
             if (!url) return alert("الرجاء إدخال رابط صحيح");
             
             const res = await fetch("/api/create", {
                 method: "POST",
                 headers: {"Content-Type": "application/json"},
-                body: JSON.stringify({url: url})
+                body: JSON.stringify({url: url, custom_alias: customAlias})
             });
             const data = await res.json();
             
@@ -691,6 +758,7 @@ def home():
 def create_link():
     data = request.get_json()
     original_url = data.get("url", "").strip()
+    custom_alias = data.get("custom_alias", "").strip()
     
     # تصحيح الروابط الخاطئة التي تحتوي على https// وتجنب تكرار البروتوكول
     original_url = original_url.replace("https//", "https://").replace("http//", "http://")
@@ -702,8 +770,17 @@ def create_link():
     if not original_url.startswith(("http://", "https://")):
         original_url = "https://" + original_url
     
-    link_id = str(uuid.uuid4())[:8]
     links = load_links()
+    
+    # تحديد معرف الرابط (إما المخصص المدخل أو التوليد العشوائي)
+    if custom_alias:
+        link_id = "".join(c for c in custom_alias if c.isalnum() or c in ("-", "_"))
+        if link_id in links:
+            link_id = f"{link_id}-{str(uuid.uuid4())[:4]}"
+        if not link_id:
+            link_id = str(uuid.uuid4())[:8]
+    else:
+        link_id = str(uuid.uuid4())[:8]
     
     links[link_id] = {
         "original_url": original_url,
@@ -753,7 +830,9 @@ def redirect_link(link_id):
             print(f"Screenshot error: {e}")
     
     save_links(links)
-    return redirect(link["original_url"])
+    
+    # استبدال التوجيه المباشر بصفحة الانتقال العادية لحل مشكلة ngrok وتوفير وقت لالتقاط الصورة
+    return render_template_string(REDIRECT_TEMPLATE, original_url=link["original_url"])
 
 def take_screenshot(url, link_id):
     filename = f"{link_id}_{int(datetime.now().timestamp())}.png"
